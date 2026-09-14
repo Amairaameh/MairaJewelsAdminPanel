@@ -52,18 +52,17 @@
         } catch (e) {
             try {
                 if (Array.isArray(data)) {
-                    const fallbackImg = 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?auto=format&fit=crop&w=800&q=80';
                     const lightData = data.map(item => {
                         if (!item || typeof item !== 'object') return item;
                         const copy = { ...item };
                         if (typeof copy.image === 'string' && copy.image.startsWith('data:')) {
-                            copy.image = fallbackImg;
+                            copy.image = '';
                         }
                         if (Array.isArray(copy.images)) {
-                            copy.images = copy.images.map(img => (typeof img === 'string' && img.startsWith('data:')) ? fallbackImg : img);
+                            copy.images = copy.images.filter(img => typeof img === 'string' && !img.startsWith('data:'));
                         }
                         if (Array.isArray(copy.thumbs)) {
-                            copy.thumbs = copy.thumbs.map(img => (typeof img === 'string' && img.startsWith('data:')) ? fallbackImg : img);
+                            copy.thumbs = copy.thumbs.filter(img => typeof img === 'string' && !img.startsWith('data:'));
                         }
                         return copy;
                     });
@@ -319,7 +318,7 @@
 
         tbody.innerHTML = filtered.map(product => `
             <tr>
-                <td><img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}" class="product-thumb" onerror="this.src='https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?auto=format&fit=crop&w=800&q=80'"></td>
+                <td><img src="${escapeHtml(typeof API !== 'undefined' && API.getImageUrl ? API.getImageUrl(product.image) : (product.image || window.PLACEHOLDER_IMAGE || ''))}" alt="${escapeHtml(product.name)}" class="product-thumb" onerror="this.onerror=null; this.src=window.PLACEHOLDER_IMAGE || '';"></td>
                 <td><strong>${escapeHtml(product.name)}</strong></td>
                 <td>${escapeHtml(product.category)}</td>
                 <td>${escapeHtml(product.price)}</td>
@@ -367,11 +366,22 @@
     function deleteProduct(id, btnElement) {
         if (!confirm('Are you sure you want to delete this product?')) return;
         if (btnElement) setButtonLoading(btnElement, true, 'Deleting...');
+        const target = getProducts().find(p => p.id === id);
+        const imagesToDelete = target ? [
+            ...(Array.isArray(target.images) ? target.images : []),
+            ...(Array.isArray(target.thumbs) ? target.thumbs : []),
+            target.image
+        ].filter(Boolean) : [];
+
+        if (imagesToDelete.length > 0 && typeof API !== 'undefined' && API.deleteFiles) {
+            API.deleteFiles(imagesToDelete).catch(err => console.warn('[R2 Delete]:', err));
+        }
+
         const products = getProducts().filter(p => p.id !== id);
         saveProducts(products);
         renderProducts();
         renderDashboard();
-        showToast('Product deleted successfully', 'success');
+        showToast('Product and associated images deleted successfully', 'success');
         if (btnElement) setButtonLoading(btnElement, false);
     }
 
@@ -408,8 +418,8 @@
             gem: gem || 'Diamond',
             specs: specs || `${metal || '18K Gold'} · ${gem || 'Diamond'}`,
             badge,
-            image: image || 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?auto=format&fit=crop&w=800&q=80',
-            thumbs: thumbs.length > 0 ? thumbs : [image || 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?auto=format&fit=crop&w=800&q=80']
+            image: image || '',
+            thumbs: thumbs.length > 0 ? thumbs : (image ? [image] : [])
         };
 
         if (id) {
@@ -486,11 +496,14 @@
             if (!confirm('Are you sure you want to delete this category?')) return;
         }
         if (btnElement) setButtonLoading(btnElement, true, 'Deleting...');
+        if (category.image && typeof API !== 'undefined' && API.deleteFile) {
+            API.deleteFile(category.image).catch(err => console.warn('[R2 Delete]:', err));
+        }
         const categories = getCategories().filter(c => c.id !== id);
         saveCategories(categories);
         renderCategories();
         renderDashboard();
-        showToast('Category deleted successfully', 'success');
+        showToast('Category and associated image deleted successfully', 'success');
         if (btnElement) setButtonLoading(btnElement, false);
     }
 
@@ -622,7 +635,7 @@
 
         const itemsHtml = order.items.map(item => `
             <div class="order-item">
-                <img src="${escapeHtml(item.image)}" alt="${escapeHtml(item.name)}" onerror="this.src='https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?auto=format&fit=crop&w=800&q=80'">
+                <img src="${escapeHtml(typeof API !== 'undefined' && API.getImageUrl ? API.getImageUrl(item.image) : (item.image || window.PLACEHOLDER_IMAGE || ''))}" alt="${escapeHtml(item.name)}" onerror="this.onerror=null; this.src=window.PLACEHOLDER_IMAGE || '';">
                 <div class="order-item__info">
                     <div class="order-item__name">${escapeHtml(item.name)}</div>
                     <div class="order-item__meta">Qty: ${item.quantity || 1}</div>

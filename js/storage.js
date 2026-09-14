@@ -63,18 +63,17 @@ const Storage = {
         } catch (e) {
             try {
                 if (Array.isArray(data)) {
-                    const fallbackImg = 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?auto=format&fit=crop&w=800&q=80';
                     const lightData = data.map(item => {
                         if (!item || typeof item !== 'object') return item;
                         const copy = { ...item };
                         if (typeof copy.image === 'string' && copy.image.startsWith('data:')) {
-                            copy.image = fallbackImg;
+                            copy.image = '';
                         }
                         if (Array.isArray(copy.images)) {
-                            copy.images = copy.images.map(img => (typeof img === 'string' && img.startsWith('data:')) ? fallbackImg : img);
+                            copy.images = copy.images.filter(img => typeof img === 'string' && !img.startsWith('data:'));
                         }
                         if (Array.isArray(copy.thumbs)) {
-                            copy.thumbs = copy.thumbs.map(img => (typeof img === 'string' && img.startsWith('data:')) ? fallbackImg : img);
+                            copy.thumbs = copy.thumbs.filter(img => typeof img === 'string' && !img.startsWith('data:'));
                         }
                         return copy;
                     });

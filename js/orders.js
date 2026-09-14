@@ -319,11 +319,11 @@ function showOrderItemsModal(order) {
             const price = item.priceNum != null ? item.priceNum : (parseFloat(item.price) || 0);
             const qty = item.quantity || item.qty || 1;
             const sub = price * qty;
-            const img = item.image || (item.images && item.images[0]) || 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?auto=format&fit=crop&w=800&q=80';
+            const img = item.image || (item.images && item.images[0]) || '';
 
             return `
                 <div class="order-item" style="padding: 0.85rem 0;">
-                    <img src="${escapeHtml(img)}" alt="${escapeHtml(item.name || 'Product')}" onerror="this.src='https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?auto=format&fit=crop&w=800&q=80'">
+                    <img src="${escapeHtml(API.getImageUrl ? API.getImageUrl(img) : (img || window.PLACEHOLDER_IMAGE || ''))}" alt="${escapeHtml(item.name || 'Product')}" onerror="this.onerror=null; this.src=window.PLACEHOLDER_IMAGE || '';">
                     <div class="order-item__info">
                         <div class="order-item__name">${escapeHtml(item.name || 'Jewelry Piece')}</div>
                         <div class="order-item__meta" style="color: var(--color-muted); font-size: 0.78rem; margin-top: 2px;">
@@ -387,7 +387,7 @@ function showOrderDetails(order) {
 
     const itemsHtml = items.map(item => `
         <div class="order-item">
-            <img src="${escapeHtml(item.image || (item.images && item.images[0]) || '')}" alt="${escapeHtml(item.name || 'Product')}" onerror="this.src='https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?auto=format&fit=crop&w=800&q=80'">
+            <img src="${escapeHtml(API.getImageUrl ? API.getImageUrl(item.image || (item.images && item.images[0]) || '') : (item.image || (item.images && item.images[0]) || window.PLACEHOLDER_IMAGE || ''))}" alt="${escapeHtml(item.name || 'Product')}" onerror="this.onerror=null; this.src=window.PLACEHOLDER_IMAGE || '';">
             <div class="order-item__info">
                 <div class="order-item__name">${escapeHtml(item.name || 'Piece')}</div>
                 <div class="order-item__meta">Qty: ${item.quantity || item.qty || 1} · ${escapeHtml(item.price || formatPrice(item.priceNum || 0))}</div>

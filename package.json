@@ -4,8 +4,8 @@
   "description": "Admin Panel for Maira Jewels",
   "main": "index.html",
   "scripts": {
-    "dev": "serve .",
-    "start": "serve ."
+    "dev": "serve -l 3445 .",
+    "start": "serve -l 3445 ."
   },
   "keywords": [],
   "author": "",

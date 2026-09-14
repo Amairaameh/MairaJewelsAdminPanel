@@ -3,9 +3,24 @@
  * Interfacing directly with https://maira-backend-mngd.onrender.com/api/v1
  */
 
-const API_BASE_URL = 'https://maira-backend-mngd.onrender.com/api/v1';
+const API_BASE_URL = 'http://localhost:5000/api/v1';
+
+window.PLACEHOLDER_IMAGE = window.PLACEHOLDER_IMAGE || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100%" height="100%" fill="%23f5f0e6"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" font-size="28">💎</text></svg>';
 
 const API = {
+    getImageUrl: function (url) {
+        if (!url || typeof url !== 'string' || !url.trim()) {
+            return window.PLACEHOLDER_IMAGE;
+        }
+        const clean = url.trim();
+        if (clean.startsWith('http://') || clean.startsWith('https://') || clean.startsWith('data:') || clean.startsWith('blob:')) {
+            return clean;
+        }
+        const backendRoot = API_BASE_URL.replace(/\/api\/v1\/?$/, '');
+        const cleanPath = clean.startsWith('/') ? clean : `/${clean}`;
+        return `${backendRoot}${cleanPath}`;
+    },
+
     getToken: function () {
         return localStorage.getItem('maira_admin_token') || localStorage.getItem('token') || localStorage.getItem('admin_token') || '';
     },
@@ -111,6 +126,112 @@ const API = {
         return await this.request('/products/' + id, {
             method: 'DELETE'
         });
+    },
+
+    uploadSingle: async function (file, folder = 'products') {
+        const formData = new FormData();
+        formData.append('image', file);
+        formData.append('file', file);
+        formData.append('folder', folder);
+        const token = this.getToken();
+        const headers = {};
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+
+        const response = await fetch(API_BASE_URL + '/upload/single', {
+            method: 'POST',
+            headers: headers,
+            body: formData
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message || ('Upload failed with status ' + response.status));
+
+        const url = data?.data?.url || data?.url || data?.data?.file?.url || data?.file?.url || data?.data?.imageUrl || (typeof data?.data === 'string' ? data.data : '') || (typeof data === 'string' ? data : '');
+        if (!url) throw new Error('No image URL returned from server upload');
+        return { ...data, url: url };
+    },
+
+    uploadMultiple: async function (files, folder = 'products') {
+        const formData = new FormData();
+        Array.from(files).forEach(f => {
+            formData.append('images', f);
+            formData.append('files', f);
+        });
+        formData.append('folder', folder);
+        const token = this.getToken();
+        const headers = {};
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+
+        const response = await fetch(API_BASE_URL + '/upload/multiple', {
+            method: 'POST',
+            headers: headers,
+            body: formData
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message || ('Upload failed with status ' + response.status));
+
+        let rawFiles = data.data?.files || data.files || data.data?.urls || data.urls || (Array.isArray(data.data) ? data.data : []);
+        if (!Array.isArray(rawFiles) && data.data && typeof data.data === 'object') {
+            rawFiles = Object.values(data.data);
+        }
+
+        const urls = rawFiles.map(item => {
+            if (typeof item === 'string') return item;
+            return item?.url || item?.location || item?.path || '';
+        }).filter(Boolean);
+
+        if (urls.length === 0 && data.url) {
+            urls.push(data.url);
+        }
+
+        if (urls.length === 0) {
+            throw new Error('No image URLs returned from server upload');
+        }
+
+        return urls;
+    },
+
+    deleteFile: async function (fileUrlOrKey) {
+        if (!fileUrlOrKey || typeof fileUrlOrKey !== 'string') return;
+        const clean = fileUrlOrKey.trim();
+        if (!clean || clean.startsWith('data:')) return;
+        try {
+            return await this.request('/upload', {
+                method: 'DELETE',
+                body: JSON.stringify({ url: clean, key: clean, file: clean, path: clean })
+            });
+        } catch (e1) {
+            try {
+                return await this.request('/upload/delete', {
+                    method: 'POST',
+                    body: JSON.stringify({ url: clean, key: clean, file: clean, path: clean })
+                });
+            } catch (e2) {
+                console.warn('[R2 Delete File Sync]:', e2.message);
+            }
+        }
+    },
+
+    deleteFiles: async function (urls = []) {
+        if (!Array.isArray(urls) || urls.length === 0) return;
+        const validUrls = Array.from(new Set(urls.filter(u => typeof u === 'string' && u.trim() && !u.startsWith('data:'))));
+        if (validUrls.length === 0) return;
+        try {
+            return await this.request('/upload/bulk-delete', {
+                method: 'DELETE',
+                body: JSON.stringify({ urls: validUrls, keys: validUrls, files: validUrls })
+            });
+        } catch (e1) {
+            try {
+                return await this.request('/upload/delete-multiple', {
+                    method: 'POST',
+                    body: JSON.stringify({ urls: validUrls, keys: validUrls, files: validUrls })
+                });
+            } catch (e2) {
+                for (const u of validUrls) {
+                    await this.deleteFile(u);
+                }
+            }
+        }
     },
 
     getCategories: async function () {

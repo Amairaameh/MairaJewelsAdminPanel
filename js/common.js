@@ -25,6 +25,9 @@ function requireAuth() {
     }
 })();
 
+// ============ GLOBAL ASSETS & CONSTANTS ============
+window.PLACEHOLDER_IMAGE = window.PLACEHOLDER_IMAGE || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100%" height="100%" fill="%23f5f0e6"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" font-size="28">💎</text></svg>';
+
 // ============ FORMATTING & UTILITIES ============
 function formatPrice(val) {
     return 'R ' + Number(val).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });

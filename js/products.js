@@ -147,8 +147,8 @@ function renderProducts() {
 
         const images = (product.images && product.images.length > 0) 
             ? product.images 
-            : (product.thumbs && product.thumbs.length > 0 ? product.thumbs : [product.image || 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?auto=format&fit=crop&w=800&q=80']);
-        const primaryImg = images[0] || 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?auto=format&fit=crop&w=800&q=80';
+            : (product.thumbs && product.thumbs.length > 0 ? product.thumbs : (product.image ? [product.image] : []));
+        const primaryImg = images[0] || '';
         const imgCount = images.length;
 
         const detailsSnippet = product.details
@@ -183,7 +183,7 @@ function renderProducts() {
                 <td>
                     <div class="table-product-cell">
                         <div class="product-thumb-wrap">
-                            <img src="${escapeHtml(primaryImg)}" alt="${escapeHtml(product.name)}" class="product-thumb" onerror="this.src='https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?auto=format&fit=crop&w=800&q=80'">
+                            <img src="${escapeHtml(API.getImageUrl(primaryImg))}" alt="${escapeHtml(product.name)}" class="product-thumb" onerror="this.onerror=null; this.src=window.PLACEHOLDER_IMAGE || '';">
                             ${imgCount > 1 ? `<span class="img-count-badge" title="${imgCount} images">${imgCount}</span>` : ''}
                         </div>
                         <div class="table-product-info">
@@ -280,7 +280,7 @@ function renderModalPreviews() {
 
     container.innerHTML = currentProductImages.map((imgUrl, index) => `
         <div class="image-preview-card">
-            <img src="${escapeHtml(imgUrl)}" alt="Product Image ${index + 1}" onerror="this.src='https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?auto=format&fit=crop&w=800&q=80'">
+            <img src="${escapeHtml(API.getImageUrl(imgUrl))}" alt="Product Image ${index + 1}" onerror="this.onerror=null; this.src=window.PLACEHOLDER_IMAGE || '';">
             ${index === 0 ? '<span class="primary-tag">Main</span>' : ''}
             <button type="button" class="btn-remove-img" data-remove-index="${index}" title="Remove Image">&times;</button>
         </div>
@@ -335,7 +335,7 @@ function openProductModal(product) {
 
         currentProductImages = (product.images && product.images.length > 0)
             ? [...product.images]
-            : (product.thumbs && product.thumbs.length > 0 ? [...product.thumbs] : [product.image || 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=800&q=80']);
+            : (product.thumbs && product.thumbs.length > 0 ? [...product.thumbs] : (product.image ? [product.image] : []));
     } else {
         idInput.value = '';
         nameInput.value = '';
@@ -368,14 +368,25 @@ async function deleteProduct(id, btnElement) {
     const targetProduct = productsList.find(p => p.id === id || p._id === id);
     const dbId = (targetProduct && targetProduct._id) ? targetProduct._id : id;
     if (btnElement) setButtonLoading(btnElement, true, 'Deleting...');
+
+    const imagesToDelete = targetProduct ? [
+        ...(Array.isArray(targetProduct.images) ? targetProduct.images : []),
+        ...(Array.isArray(targetProduct.thumbs) ? targetProduct.thumbs : []),
+        targetProduct.image
+    ].filter(Boolean) : [];
+
     try {
         if (typeof API !== 'undefined' && API.deleteProduct) {
             await API.deleteProduct(dbId);
         }
+        // Clean up Cloudflare R2 files
+        if (imagesToDelete.length > 0 && typeof API !== 'undefined' && API.deleteFiles) {
+            API.deleteFiles(imagesToDelete).catch(err => console.warn('[R2 Product Image Deletion Sync]:', err));
+        }
         productsList = productsList.filter(p => p.id !== id && p._id !== id);
         Storage.saveProducts(productsList);
         renderProducts();
-        showToast('Product deleted successfully', 'success');
+        showToast('Product and associated images deleted successfully', 'success');
     } catch (e) {
         console.error('API delete error:', e);
         showToast('Failed to delete product: ' + e.message, 'error');
@@ -420,9 +431,7 @@ async function handleProductForm(e) {
         id = autogenCode;
     }
 
-    const imagesToSave = currentProductImages.length > 0 
-        ? currentProductImages 
-        : ['https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=800&q=80'];
+    const imagesToSave = currentProductImages.length > 0 ? currentProductImages : [];
 
     const stockInput = document.getElementById('product-stock');
     const rawStock = stockInput ? parseInt(stockInput.value, 10) : 10;
@@ -537,23 +546,44 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function handleFilesUpload(fileList) {
-        let validFiles = 0;
-        Array.from(fileList).forEach(file => {
+    async function handleFilesUpload(fileList) {
+        const imageFiles = Array.from(fileList).filter(file => {
             if (!file.type.startsWith('image/')) {
                 showToast(`File "${file.name}" is not an image`, 'error');
-                return;
+                return false;
             }
-            validFiles++;
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                currentProductImages.push(e.target.result);
-                renderModalPreviews();
-            };
-            reader.readAsDataURL(file);
+            return true;
         });
-        if (validFiles > 0) {
-            showToast(`Added ${validFiles} image(s) successfully`, 'success');
+
+        if (imageFiles.length === 0) return;
+
+        const container = document.getElementById('image-previews-container');
+        if (container) {
+            const loadingHtml = `<div id="r2-upload-spinner" style="grid-column: 1/-1; display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: #bfa15f; padding: 0.5rem 0;">
+                <div class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></div> Uploading ${imageFiles.length} image(s) to Cloudflare R2...
+            </div>`;
+            container.insertAdjacentHTML('beforeend', loadingHtml);
+        }
+
+        try {
+            if (typeof API !== 'undefined' && API.uploadMultiple) {
+                const urls = await API.uploadMultiple(imageFiles, 'products');
+                if (Array.isArray(urls) && urls.length > 0) {
+                    currentProductImages.push(...urls);
+                    showToast(`Uploaded ${urls.length} image(s) to Cloudflare R2`, 'success');
+                } else {
+                    throw new Error('No image URLs returned from Cloudflare R2 upload');
+                }
+            } else {
+                throw new Error('Upload API client not initialized');
+            }
+        } catch (err) {
+            console.error('[Cloudflare R2 Upload Error]:', err);
+            showToast('Cloudflare R2 upload failed: ' + err.message, 'error');
+        } finally {
+            const spinner = document.getElementById('r2-upload-spinner');
+            if (spinner) spinner.remove();
+            renderModalPreviews();
         }
     }
 

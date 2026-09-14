@@ -147,7 +147,7 @@ function renderCategories() {
             <tr>
                 <td style="width: 50px; text-align: center;">
                     <div style="width: 38px; height: 38px; border-radius: 6px; overflow: hidden; background: #f5f0e6; border: 1px solid #e2dacd; display: flex; align-items: center; justify-content: center; margin: 0 auto; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
-                        ${cat.image ? `<img src="${cat.image}" alt="${escapeHtml(catName)}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?auto=format&fit=crop&w=100&q=80';">` : '<span style="font-size: 16px; color: #bfa15f;">💎</span>'}
+                        ${cat.image ? `<img src="${API.getImageUrl ? API.getImageUrl(cat.image) : cat.image}" alt="${escapeHtml(catName)}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.onerror=null; this.src=window.PLACEHOLDER_IMAGE || '';">` : '<span style="font-size: 16px; color: #bfa15f;">💎</span>'}
                     </div>
                 </td>
                 <td><span class="product-id-badge">${escapeHtml(displayCatId)}</span></td>
@@ -219,14 +219,19 @@ async function deleteCategory(id, btnElement) {
 
     if (btnElement) setButtonLoading(btnElement, true, 'Deleting...');
     const dbId = category._id || category.id || id;
+    const categoryImage = category.image;
     try {
         if (typeof API !== 'undefined' && API.deleteCategory) {
             await API.deleteCategory(dbId);
         }
+        // Clean up Cloudflare R2 file
+        if (categoryImage && typeof API !== 'undefined' && API.deleteFile) {
+            API.deleteFile(categoryImage).catch(err => console.warn('[R2 Category Image Deletion Sync]:', err));
+        }
         categoriesList = categoriesList.filter(c => c.id !== id && c._id !== id);
         Storage.saveCategories(categoriesList);
         renderCategories();
-        showToast('Category deleted successfully', 'success');
+        showToast('Category and associated image deleted successfully', 'success');
     } catch (e) {
         console.error('API delete category error:', e);
         showToast('Failed to delete category: ' + e.message, 'error');
@@ -353,18 +358,42 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function handleCategoryFileUpload(file) {
+    async function handleCategoryFileUpload(file) {
         if (!file.type.startsWith('image/')) {
             showToast('Selected file is not an image', 'error');
             return;
         }
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            currentCategoryImage = e.target.result;
+
+        const previewContainer = document.getElementById('category-image-preview-container');
+        const dropzone = document.getElementById('category-upload-dropzone');
+        if (previewContainer) {
+            previewContainer.innerHTML = `<div id="category-upload-spinner" style="display: flex; align-items: center; justify-content: center; height: 100px; gap: 8px; color: #bfa15f; font-size: 0.82rem;">
+                <div class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></div> Uploading image to Cloudflare R2...
+            </div>`;
+            previewContainer.style.display = 'block';
+            if (dropzone) dropzone.style.display = 'none';
+        }
+
+        try {
+            if (typeof API !== 'undefined' && API.uploadSingle) {
+                const res = await API.uploadSingle(file, 'categories');
+                const url = res.url || res.data?.url || res;
+                if (url && typeof url === 'string') {
+                    currentCategoryImage = url;
+                    restoreCategoryPreviewMarkup();
+                    renderCategoryImagePreview();
+                    showToast('Image uploaded to Cloudflare R2 successfully', 'success');
+                    return;
+                }
+            }
+            throw new Error('Upload service returned no URL');
+        } catch (err) {
+            console.error('[Cloudflare R2 Category Upload Error]:', err);
+            showToast('Cloudflare R2 upload failed: ' + err.message, 'error');
+            currentCategoryImage = '';
+            restoreCategoryPreviewMarkup();
             renderCategoryImagePreview();
-            showToast('Image uploaded successfully', 'success');
-        };
-        reader.readAsDataURL(file);
+        }
     }
 
     loadCategoriesData();
@@ -389,18 +418,45 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
+function restoreCategoryPreviewMarkup() {
+    const previewContainer = document.getElementById('category-image-preview-container');
+    if (!previewContainer) return;
+    previewContainer.innerHTML = `
+        <div style="position: relative; width: 100%; height: 140px; border-radius: 8px; overflow: hidden; border: 1px solid #e0d8cc;">
+            <img id="category-image-preview" src="" alt="Category preview" style="width: 100%; height: 100%; object-fit: cover;">
+            <button type="button" id="btn-remove-category-image" style="position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.65); color: #fff; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; font-size: 14px; line-height: 24px; text-align: center;">&times;</button>
+        </div>
+    `;
+    const btnRemove = document.getElementById('btn-remove-category-image');
+    if (btnRemove) {
+        btnRemove.addEventListener('click', (e) => {
+            e.preventDefault();
+            currentCategoryImage = '';
+            renderCategoryImagePreview();
+            const fileInput = document.getElementById('category-file-input');
+            if (fileInput) fileInput.value = '';
+        });
+    }
+}
+
 function renderCategoryImagePreview() {
     const previewContainer = document.getElementById('category-image-preview-container');
     const previewImg = document.getElementById('category-image-preview');
     const dropzone = document.getElementById('category-upload-dropzone');
-    if (!previewContainer || !previewImg) return;
+    if (!previewContainer) return;
 
     if (currentCategoryImage) {
-        previewImg.src = currentCategoryImage;
+        if (!previewImg) {
+            restoreCategoryPreviewMarkup();
+        }
+        const imgEl = document.getElementById('category-image-preview');
+        if (imgEl) {
+            imgEl.src = typeof API !== 'undefined' && API.getImageUrl ? API.getImageUrl(currentCategoryImage) : currentCategoryImage;
+        }
         previewContainer.style.display = 'block';
         if (dropzone) dropzone.style.display = 'none';
     } else {
-        previewImg.src = '';
+        if (previewImg) previewImg.src = '';
         previewContainer.style.display = 'none';
         if (dropzone) dropzone.style.display = 'block';
     }
